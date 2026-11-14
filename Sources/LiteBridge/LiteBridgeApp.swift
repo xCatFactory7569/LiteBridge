@@ -31,6 +31,10 @@ struct LiteBridgeApp: App {
                     .keyboardShortcut(.delete, modifiers: .command)
                 Button("Open Review Bin") { lib.openBin() }
                     .keyboardShortcut("b", modifiers: [.command, .shift])
+                Toggle("Include Subfolders", isOn: $lib.includeSubfolders)
+                    .keyboardShortcut("i", modifiers: [.command, .shift])
+                Toggle("Show Paths", isOn: $lib.showPaths)
+                    .keyboardShortcut("p", modifiers: [.command, .shift])
                 Toggle("Deleting uses the Review Bin (off = Finder Trash)", isOn: $lib.useBin)
             }
         }

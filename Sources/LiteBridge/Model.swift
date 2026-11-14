@@ -14,6 +14,23 @@ struct FileItem: Identifiable, Hashable {
     var id: URL { url }
     var name: String { url.lastPathComponent }
     var ext: String { url.pathExtension.lowercased() }
+
+    /// Normalised file type used by the type chips (jpeg → jpg, tiff → tif).
+    var kind: String {
+        switch ext {
+        case "jpeg", "jpe": return "jpg"
+        case "tiff": return "tif"
+        case "": return "other"
+        default: return ext
+        }
+    }
+}
+
+struct TypeCount: Identifiable {
+    let kind: String
+    let count: Int
+    var id: String { kind }
+    var title: String { kind == "other" ? "Other" : kind.uppercased() }
 }
 
 enum SortKey: String, CaseIterable, Identifiable {
@@ -22,6 +39,7 @@ enum SortKey: String, CaseIterable, Identifiable {
     case date = "Date modified"
     case size = "Size"
     case rating = "Rating"
+    case folder = "Folder"
     var id: String { rawValue }
 }
 
@@ -98,6 +116,17 @@ final class Library: ObservableObject {
     @Published var showPreview = true
     @Published var recents: [URL] = []
     @Published var status = ""
+    @Published var typeFilter: Set<String> = []
+    @Published var includeSubfolders = false {
+        didSet {
+            guard oldValue != includeSubfolders else { return }
+            if includeSubfolders { showPaths = true }
+            refresh()
+        }
+    }
+    @Published var showPaths = false {
+        didSet { UserDefaults.standard.set(showPaths, forKey: "showPaths") }
+    }
     @Published var root: URL?
     @Published var binCount = 0
     @Published var useBin = true {
@@ -118,6 +147,7 @@ final class Library: ObservableObject {
     init() {
         let saved = UserDefaults.standard.stringArray(forKey: "recents") ?? []
         recents = saved.map { URL(fileURLWithPath: $0) }.filter { FileManager.default.fileExists(atPath: $0.path) }
+        showPaths = UserDefaults.standard.bool(forKey: "showPaths")
         useBin = UserDefaults.standard.object(forKey: "useBin") as? Bool ?? true
         if let last = recents.first { load(last, remember: false) }
 
@@ -132,6 +162,7 @@ final class Library: ObservableObject {
     var visible: [FileItem] {
         var r = items
         if minRating > 0 { r = r.filter { $0.rating >= minRating } }
+        if !typeFilter.isEmpty { r = r.filter { typeFilter.contains($0.kind) } }
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
         if !q.isEmpty {
             r = r.filter { $0.name.lowercased().contains(q) || $0.tags.contains { $0.lowercased().contains(q) } }
@@ -145,6 +176,12 @@ final class Library: ObservableObject {
         case .date: r.sort { $0.modified > $1.modified }
         case .size: r.sort { $0.size > $1.size }
         case .rating: r.sort { $0.rating == $1.rating ? byName($0, $1) : $0.rating > $1.rating }
+        case .folder:
+            r.sort {
+                let a = $0.url.deletingLastPathComponent().path
+                let b = $1.url.deletingLastPathComponent().path
+                return a == b ? byName($0, $1) : a.localizedStandardCompare(b) == .orderedAscending
+            }
         }
         return r
     }
@@ -152,6 +189,33 @@ final class Library: ObservableObject {
     var primaryItem: FileItem? {
         guard let p = primary else { return nil }
         return items.first { $0.id == p }
+    }
+
+    var typeCounts: [TypeCount] {
+        var d: [String: Int] = [:]
+        for i in items { d[i.kind, default: 0] += 1 }
+        return d.map { TypeCount(kind: $0.key, count: $0.value) }
+            .sorted { $0.count == $1.count ? $0.kind < $1.kind : $0.count > $1.count }
+    }
+
+    func toggleType(_ kind: String) {
+        if typeFilter.contains(kind) { typeFilter.remove(kind) } else { typeFilter.insert(kind) }
+    }
+
+    /// Folder of a file, relative to the folder being viewed ("" if it is directly inside).
+    func relativeFolder(_ item: FileItem) -> String {
+        guard let f = folder else { return "" }
+        let base = f.standardizedFileURL.path
+        let dir = item.url.deletingLastPathComponent().standardizedFileURL.path
+        if dir == base { return "" }
+        if dir.hasPrefix(base + "/") { return String(dir.dropFirst(base.count + 1)) }
+        return dir
+    }
+
+    func copyPath(_ url: URL) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url.path, forType: .string)
+        status = "Path copied."
     }
 
     // MARK: Loading
@@ -175,6 +239,7 @@ final class Library: ObservableObject {
         primary = nil
         anchor = nil
         search = ""
+        typeFilter = []
         if remember {
             recents.removeAll { $0 == url }
             recents.insert(url, at: 0)
@@ -190,23 +255,43 @@ final class Library: ObservableObject {
         let urls = (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles])) ?? []
         var files: [FileItem] = []
         var dirs: [URL] = []
-        for u in urls {
+
+        func makeItem(_ u: URL) -> FileItem {
             let v = try? u.resourceValues(forKeys: Set(keys))
-            if v?.isDirectory == true {
-                dirs.append(u)
-                continue
-            }
-            files.append(FileItem(
+            return FileItem(
                 url: u,
                 rating: Self.readRating(u),
                 tags: Self.readTags(u),
                 size: v?.fileSize ?? 0,
                 modified: v?.contentModificationDate ?? .distantPast
-            ))
+            )
+        }
+
+        for u in urls {
+            let v = try? u.resourceValues(forKeys: Set(keys))
+            if v?.isDirectory == true {
+                dirs.append(u)
+            } else if !includeSubfolders {
+                files.append(makeItem(u))
+            }
+        }
+
+        if includeSubfolders,
+           let en = fm.enumerator(at: folder, includingPropertiesForKeys: keys,
+                                  options: [.skipsHiddenFiles, .skipsPackageDescendants]) {
+            for case let u as URL in en {
+                let v = try? u.resourceValues(forKeys: Set(keys))
+                if v?.isDirectory == true {
+                    if u.lastPathComponent == Self.binName { en.skipDescendants() }
+                    continue
+                }
+                files.append(makeItem(u))
+            }
         }
         items = files
         subfolders = dirs.filter { $0.lastPathComponent != Self.binName }.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
         let ids = Set(files.map { $0.url })
+        typeFilter = typeFilter.intersection(Set(files.map { $0.kind }))
         selection = selection.intersection(ids)
         if let p = primary, !ids.contains(p) { primary = selection.first }
         updateBinCount()

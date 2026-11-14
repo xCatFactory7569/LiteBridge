@@ -107,6 +107,16 @@ struct ContentView: View {
                 } label: {
                     Label("Rating filter", systemImage: lib.minRating > 0 ? "star.fill" : "star")
                 }
+                Toggle(isOn: $lib.includeSubfolders) {
+                    Label("Include subfolders", systemImage: "square.stack.3d.down.right")
+                }
+                .toggleStyle(.button)
+                .help("Show files from all subfolders in one flat view")
+                Toggle(isOn: $lib.showPaths) {
+                    Label("Show paths", systemImage: "text.alignleft")
+                }
+                .toggleStyle(.button)
+                .help("Show or hide file and folder paths")
                 Slider(value: $lib.thumbSize, in: 90...700).frame(width: 120)
                 Button { lib.showPreview.toggle() } label: { Label("Preview", systemImage: "sidebar.right") }
             }
@@ -126,6 +136,7 @@ struct SidebarView: View {
                     Label(lib.inBin ? "Review Bin" : folder.lastPathComponent,
                           systemImage: lib.inBin ? "trash.fill" : "folder.fill")
                         .foregroundColor(.accentColor)
+                        .help(folder.path)
                     let parent = folder.deletingLastPathComponent()
                     Button { lib.load(parent) } label: {
                         Label(lib.inBin ? "Back to folder" : "Up one level", systemImage: "arrow.turn.left.up")
@@ -201,6 +212,7 @@ struct GridPane: View {
                 .background(Color.orange.opacity(0.15))
                 Divider()
             }
+            TypeFilterBar()
             GeometryReader { geo in
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -226,6 +238,13 @@ struct GridPane: View {
             HStack {
                 Text("\(lib.visible.count) items")
                 if !lib.selection.isEmpty { Text("· \(lib.selection.count) selected") }
+                if lib.showPaths {
+                    Text("·")
+                    Text((lib.primaryItem?.url.deletingLastPathComponent() ?? lib.folder)?.path ?? "")
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
                 Spacer()
                 Text(lib.status).lineLimit(1)
             }
@@ -256,10 +275,19 @@ struct CellView: View {
                 .font(.caption)
                 .lineLimit(1)
                 .truncationMode(.middle)
+            if lib.showPaths {
+                let rel = lib.relativeFolder(item)
+                Text(rel.isEmpty ? "—" : rel)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
             Text(item.rating > 0 ? String(repeating: "★", count: item.rating) : " ")
                 .font(.caption2)
                 .foregroundColor(.yellow)
         }
+        .help(item.url.path)
         .padding(4)
         .background(selected ? Color.accentColor.opacity(0.2) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
@@ -360,6 +388,21 @@ struct InfoPanel: View {
             Text("\(ByteCountFormatter.string(fromByteCount: Int64(item.size), countStyle: .file)) · \(item.ext.uppercased()) · \(item.modified.formatted(date: .abbreviated, time: .shortened))")
                 .font(.caption).foregroundColor(.secondary)
 
+            if lib.showPaths {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "folder").foregroundColor(.secondary)
+                    Text(item.url.deletingLastPathComponent().path)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(3)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                    Spacer(minLength: 0)
+                    Button("Copy") { lib.copyPath(item.url) }
+                        .controlSize(.small)
+                }
+            }
+
             HStack(spacing: 4) {
                 ForEach(1...5, id: \.self) { n in
                     Image(systemName: n <= item.rating ? "star.fill" : "star")
@@ -409,5 +452,44 @@ struct InfoPanel: View {
             }
         }
         .padding(12)
+    }
+}
+
+
+// MARK: - File-type chips
+
+struct TypeFilterBar: View {
+    @EnvironmentObject var lib: Library
+
+    var body: some View {
+        let counts = lib.typeCounts
+        if counts.count > 1 {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    chip("All", count: lib.items.count, on: lib.typeFilter.isEmpty) { lib.typeFilter = [] }
+                    ForEach(counts) { c in
+                        chip(c.title, count: c.count, on: lib.typeFilter.contains(c.kind)) { lib.toggleType(c.kind) }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+            }
+            Divider()
+        }
+    }
+
+    private func chip(_ title: String, count: Int, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(title).fontWeight(.medium)
+                Text("\(count)").foregroundColor(on ? Color.white.opacity(0.8) : Color.secondary)
+            }
+            .font(.caption)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(on ? Color.accentColor : Color.gray.opacity(0.18)))
+            .foregroundColor(on ? Color.white : Color.primary)
+        }
+        .buttonStyle(.plain)
     }
 }
