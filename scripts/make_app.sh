@@ -9,6 +9,17 @@ rm -rf build
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/LiteBridge"
 
+# App icon: build AppIcon.icns from Resources/AppIcon.png (sips + iconutil exist on macOS runners)
+if [ -f Resources/AppIcon.png ]; then
+  SET="build/AppIcon.iconset"
+  mkdir -p "$SET"
+  for s in 16 32 128 256 512; do
+    sips -z $s $s Resources/AppIcon.png --out "$SET/icon_${s}x${s}.png" >/dev/null
+    sips -z $((s*2)) $((s*2)) Resources/AppIcon.png --out "$SET/icon_${s}x${s}@2x.png" >/dev/null
+  done
+  iconutil -c icns "$SET" -o "$APP/Contents/Resources/AppIcon.icns"
+fi
+
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -16,6 +27,16 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <dict>
   <key>CFBundleExecutable</key><string>LiteBridge</string>
   <key>CFBundleIdentifier</key><string>local.litebridge</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>Folder</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key><array><string>public.folder</string></array>
+    </dict>
+  </array>
   <key>CFBundleName</key><string>LiteBridge</string>
   <key>CFBundleDisplayName</key><string>LiteBridge</string>
   <key>CFBundlePackageType</key><string>APPL</string>

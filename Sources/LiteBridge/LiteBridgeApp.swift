@@ -9,7 +9,9 @@ struct LiteBridgeApp: App {
             ContentView()
                 .environmentObject(lib)
                 .frame(minWidth: 900, minHeight: 560)
+                .onOpenURL { url in lib.openExternal(url) }
         }
+        .handlesExternalEvents(matching: Set(["*"]))
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("Open Folder…") { lib.chooseFolder() }
@@ -27,6 +29,9 @@ struct LiteBridgeApp: App {
                 Divider()
                 Button("Move to Trash") { lib.trashSelection() }
                     .keyboardShortcut(.delete, modifiers: .command)
+                Button("Open Review Bin") { lib.openBin() }
+                    .keyboardShortcut("b", modifiers: [.command, .shift])
+                Toggle("Deleting uses the Review Bin (off = Finder Trash)", isOn: $lib.useBin)
             }
         }
     }

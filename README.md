@@ -3,6 +3,7 @@
 A light, native macOS file browser for big previews, quick culling, ratings and tags.
 Built with SwiftUI. Uses macOS Quick Look, so PSD, AI, PDF, JPG, PNG, RAW etc. preview natively.
 
+- Space = Quick Look; deleted files go to a Review Bin first (restore or empty later)
 - Click = select, Cmd-click / Shift-click = multi-select, double-click = open in default app
 - Arrow keys = navigate, Delete = move to Trash, Cmd+Z = undo, 0-5 = star rating
 - Drag files onto a subfolder in the sidebar to move them
